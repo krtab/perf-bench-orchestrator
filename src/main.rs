@@ -15,7 +15,7 @@ enum Command {
 
 #[derive(Debug, clap::Args)]
 struct RecordCliOptions {
-    binary_path: PathBuf,
+    command: String,
     output_file: PathBuf,
     wat_files: Vec<PathBuf>,
 }
@@ -54,7 +54,6 @@ fn scale(
 }
 
 fn record(cli_options: RecordCliOptions) -> anyhow::Result<()> {
-    // dbg!(&cli_options);
     let mut ref_cycles = prf::Builder::new(Hardware::REF_CPU_CYCLES)
         .inherit(true)
         .enable_on_exec(true)
@@ -65,10 +64,11 @@ fn record(cli_options: RecordCliOptions) -> anyhow::Result<()> {
         .build()?;
     let mut res = HashMap::new();
     for wat_file in &cli_options.wat_files {
-        let mut command = std::process::Command::new(&cli_options.binary_path);
-        command
-            // .arg("sym")
-            .arg(wat_file);
+        let mut command_words = cli_options.command.split_whitespace();
+        let command = command_words.next().expect("Non-empty command");
+        let mut command = std::process::Command::new(command);
+        command.args(command_words);
+        command.arg(wat_file);
         for c in [&mut ref_cycles, &mut instructions] {
             c.reset()?;
         }
@@ -122,17 +122,17 @@ fn compare(cli_options: CompareCliOptions) -> anyhow::Result<()> {
     fn rel_diff(base: u64, compared: u64) -> prettytable::Cell {
         let diff = (((compared as f64) - (base as f64)) * 100.) / (base as f64);
         let mut cell = prettytable::Cell::new(&format!("{diff:+.1}%",));
-        if diff > 0. {
+        if diff > 0.1 {
             cell.style(prettytable::Attr::ForegroundColor(prettytable::color::RED));
-        } else {
+        } else if diff < -0.1 {
             cell.style(prettytable::Attr::ForegroundColor(
                 prettytable::color::GREEN,
             ));
         }
         cell
     }
-    for (key, base_measure) in &base {
-        let compared_measure = &compared[key];
+    for (&key, base_measure) in &base {
+        let Some(compared_measure) = compared.get(key) else { continue };
         table.add_row(prettytable::Row::new(vec![
             prettytable::Cell::new(&key.display().to_string()),
             rel_diff(base_measure.ref_cycles, compared_measure.ref_cycles),
